@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: contractvault
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: SPRING_DATASOURCE_URL
+        value: jdbc:h2:file:/app/data/contractvaultdb;DB_CLOSE_DELAY=-1
+      - key: STORAGE_LOCATION
+        value: /app/storage
+      - key: CORS_ALLOWED_ORIGINS
+        value: "*"
+      - key: PORT
+        value: "8080"
