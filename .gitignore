@@ -1,0 +1,30 @@
+# Node & Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.local
+
+# Java / Maven build output
+backend/target/
+backend/data/
+*.mv.db
+*.trace.db
+!.mvn/wrapper/maven-wrapper.jar
+!.mvn/wrapper/maven-wrapper.properties
+
+# Local document storage
+storage/*
+!storage/.gitkeep
+
+# IDE and OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+*.log
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example

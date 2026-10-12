@@ -1,0 +1,396 @@
+# ContractVault
+
+ContractVault is an enterprise contract management application built for the **Seventh Ray Consulting and Technology Pvt. Ltd.** internship assignment.
+
+The system is designed to allow organizations to upload contracts (PDF and Microsoft Word formats), securely persist them, manage their approval workflows (`DRAFT` → `REVIEW` → `APPROVED`), query contract contents using text extraction and keyword matching, and ask natural-language questions about a contract's text.
+
+---
+
+## Technology Stack
+
+- **Backend:** Java 25, Spring Boot 4.x, Spring Data JPA, Hibernate ORM, Bean Validation, Apache PDFBox 3.0, Apache POI 5.4, Spring Boot Actuator, Maven Wrapper (`mvnw.cmd`)
+- **Database:** H2 Database (persistent file-based engine for local development; architected for easy PostgreSQL production migration)
+- **Frontend:** React 19, Vite, Tailwind CSS, Lucide React
+- **Storage:** Local persistent storage directory (`storage/`)
+- **Version Control:** Git
+
+---
+
+## Prerequisites
+
+- **Java JDK:** Java 21+ or Java 25 LTS installed
+- **Node.js:** Node.js v20+ (tested with v24.14.0) and npm 10+ (tested with 11.9.0)
+- **OS:** Windows 10/11 (PowerShell / Command Prompt)
+
+> **Note:** A global Maven installation is **not** required. The project includes the self-contained Maven Wrapper (`mvnw.cmd`).
+
+---
+
+## Monorepo Folder Structure
+
+```
+contract_vault/
+├── backend/
+│   ├── .mvn/wrapper/                  # Maven Wrapper binaries
+│   ├── data/                          # Persistent H2 file database (gitignored)
+│   ├── mvnw / mvnw.cmd                # Maven Wrapper executables
+│   ├── pom.xml                        # Maven dependencies & build definitions
+│   └── src/
+│       ├── main/
+│       │   ├── java/com/contractvault/
+│       │   │   ├── ContractVaultApplication.java
+│       │   │   ├── controller/
+│       │   │   │   ├── ContractController.java
+│       │   │   │   └── HealthController.java
+│       │   │   ├── dto/
+│       │   │   │   ├── ContractResponse.java
+│       │   │   │   └── CreateContractRequest.java
+│       │   │   ├── exception/
+│       │   │   │   ├── DocumentParsingException.java
+│       │   │   │   ├── DocumentValidationException.java
+│       │   │   │   ├── ErrorResponse.java
+│       │   │   │   ├── GlobalExceptionHandler.java
+│       │   │   │   └── ResourceNotFoundException.java
+│       │   │   ├── model/
+│       │   │   │   ├── Contract.java
+│       │   │   │   └── ContractStatus.java
+│       │   │   ├── repository/
+│       │   │   │   └── ContractRepository.java
+│       │   │   └── service/
+│       │   │       ├── ContractService.java
+│       │   │       ├── DocumentParserService.java
+│       │   │       └── StorageService.java
+│       │   └── resources/
+│       │       └── application.yml    # Database, multipart & storage configuration
+│       └── test/
+│           ├── java/com/contractvault/
+│           │   └── ContractVaultApplicationTests.java
+│           └── resources/
+│               └── application.yml    # Isolated in-memory test DB & temp storage
+├── frontend/
+│   ├── package.json
+│   ├── vite.config.js                 # Proxy config (/api -> localhost:8080)
+│   ├── index.html
+│   └── src/
+│       ├── App.jsx                    # Enterprise welcome UI & document upload modal
+│       ├── main.jsx                   # React root mount
+│       └── index.css                  # Tailwind CSS setup & design tokens
+├── storage/
+│   └── .gitkeep                       # Local protected document storage
+├── .gitignore
+└── README.md
+```
+
+---
+
+## Document Storage & Text Extraction Design (Phase 3)
+
+### 1. File Storage Design
+- **Storage Location:** Configurable via `contractvault.storage.location` (defaults to `./storage` at project root).
+- **Security & Privacy:** Uploaded documents are stored using securely generated random UUID filenames (e.g., `b5fe5b0b-f6d7-4008-b479-a2003bc8a102.pdf`).
+- **Path Traversal Protection:** Filenames are sanitized, and all file operations verify paths remain strictly within the designated storage root.
+- **Privacy:** Document storage is internal and is **never** exposed as static public web assets. Absolute paths are never returned to clients.
+- **Transactional Consistency:** If text extraction or database persistence fails, the newly uploaded physical file is automatically rolled back and deleted to avoid orphaned files.
+
+### 2. Document Text Extraction
+- **PDF Documents:** Parsed using **Apache PDFBox 3.0** (`PDFTextStripper`).
+- **Word Documents:** Parsed using **Apache POI 5.4** (`XWPFDocument` and `XWPFWordExtractor`).
+- **Signature Verification:** Validates file magic bytes (e.g. `%PDF` for PDF, `PK` ZIP container for DOCX) to ensure genuine file types rather than just checking extensions.
+- **Empty & Scanned Document Policy:** If a document contains no extractable text (such as an image-only scanned PDF), the API rejects the upload with an explicit message: *"The uploaded document contains no readable text. Scanned image-only PDFs requiring OCR are not supported."* This prevents misleading records from being created without searchable content.
+
+---
+
+## Database Configuration & Persistence
+
+ContractVault uses a persistent file-based **H2 Database** for local development configured in `backend/src/main/resources/application.yml`:
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/contractvaultdb;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: update
+```
+
+### Highlights:
+1. **Data Persistence Across Restarts:** Database records are saved to `backend/data/contractvaultdb.mv.db`, ensuring contracts and extracted text persist across application restarts.
+2. **PostgreSQL Compatibility:** Strictly adheres to JPA specifications (`@Lob` mapping to CLOB in H2 and TEXT in PostgreSQL). Production migration only requires setting standard Spring environment variables (`SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`).
+3. **Test Isolation:** Automated JUnit tests use an in-memory instance (`jdbc:h2:mem:contractvaulttest`) and isolated target storage (`./target/test-storage`) so test suites run independently without altering development data.
+
+---
+
+## REST API Endpoints
+
+### 1. Health Check
+- **Method:** `GET`
+- **URL:** `/api/health`
+- **Response:** `200 OK`
+```json
+{
+  "status": "UP",
+  "application": "ContractVault API"
+}
+```
+
+---
+
+### 2. Upload Contract Document (Multipart/Form-Data)
+- **Method:** `POST`
+- **URL:** `/api/contracts`
+- **Content-Type:** `multipart/form-data`
+- **Form Fields:**
+  - `title` *(string, required)*: Contract title (e.g., "Hospital Supplier Master Agreement")
+  - `file` *(file, required)*: PDF or DOCX file (up to 10 MB)
+
+**Sample Request (cURL):**
+```powershell
+curl.exe -X POST http://localhost:8080/api/contracts `
+  -F "title=Hospital Supplier Master Agreement" `
+  -F "file=@sample_agreement.pdf"
+```
+
+**Successful Response (`201 Created`):**
+```json
+{
+  "id": 1,
+  "title": "Hospital Supplier Master Agreement",
+  "originalFilename": "sample_agreement.pdf",
+  "status": "DRAFT",
+  "createdAt": "2026-10-12T14:27:06.579",
+  "updatedAt": "2026-10-12T14:27:06.579"
+}
+```
+
+---
+
+### 3. List All Contracts
+- **Method:** `GET`
+- **URL:** `/api/contracts`
+- **Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "title": "Hospital Supplier Master Agreement",
+    "originalFilename": "sample_agreement.pdf",
+    "status": "DRAFT",
+    "createdAt": "2026-10-12T14:27:06.579",
+    "updatedAt": "2026-10-12T14:27:06.579"
+  }
+]
+```
+
+---
+
+### 4. Fetch Single Contract by ID
+- **Method:** `GET`
+- **URL:** `/api/contracts/{id}`
+- **Response:** `200 OK`
+```json
+{
+  "id": 1,
+  "title": "Hospital Supplier Master Agreement",
+  "originalFilename": "sample_agreement.pdf",
+  "status": "DRAFT",
+  "createdAt": "2026-10-12T14:27:06.579",
+  "updatedAt": "2026-10-12T14:27:06.579"
+}
+```
+
+---
+
+### 5. Update Contract Status (PATCH)
+- **Method:** `PATCH`
+- **URL:** `/api/contracts/{id}/status`
+- **Content-Type:** `application/json`
+- **Request Body:**
+```json
+{
+  "status": "REVIEW"
+}
+```
+- **Supported Statuses:** `DRAFT`, `REVIEW`, `APPROVED`
+- **Enforced Lifecycle Transitions:**
+  - Forward: `DRAFT` → `REVIEW` → `APPROVED`
+  - Backward: `APPROVED` → `REVIEW` → `DRAFT`
+  - Skipping steps (e.g. `DRAFT` → `APPROVED`) is strictly rejected with `400 Bad Request`.
+  - Nonexistent contract IDs return `404 Not Found`.
+
+**Sample Request (cURL):**
+```bash
+curl.exe -X PATCH http://localhost:8080/api/contracts/1/status \
+  -H "Content-Type: application/json" \
+  -d "{\"status\":\"REVIEW\"}"
+```
+
+**Successful Response (`200 OK`):**
+```json
+{
+  "id": 1,
+  "title": "Hospital Supplier Master Agreement",
+  "originalFilename": "sample_agreement.pdf",
+  "status": "REVIEW",
+  "createdAt": "2026-10-12T14:27:06.579",
+  "updatedAt": "2026-10-12T14:50:15.611"
+}
+```
+
+---
+
+### 6. Open or Download Stored Contract Document
+- **Method:** `GET`
+- **URL:** `/api/contracts/{id}/document`
+- **Behavior:**
+  - **PDF Documents:** Returns `Content-Type: application/pdf` with `Content-Disposition: inline; filename="document.pdf"`, rendering directly in the browser's native PDF viewer.
+  - **DOCX Documents:** Returns `Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document` with `Content-Disposition: attachment; filename="document.docx"`, triggering an automatic file download.
+  - Documents are retrieved safely using internal UUID storage keys (never exposing server paths).
+  - Returns `404 Not Found` if contract does not exist or has no file attached.
+
+**Sample Request (cURL):**
+```bash
+curl.exe -i http://localhost:8080/api/contracts/1/document
+```
+
+---
+
+### 7. Ask a Question About a Contract (Phase 5 — Contract Q&A)
+- **Method:** `POST`
+- **URL:** `/api/contracts/{id}/ask`
+- **Content-Type:** `application/json`
+- **Request Body:**
+```json
+{
+  "question": "What is the duration of this contract?"
+}
+```
+- **Constraints:** Question must be non-blank and ≤ 500 characters.
+- **Engine:** Uses keyword tokenisation, stop-word filtering, and synonym expansion (e.g. "duration" → "term", "period") to score contract sentences and return the best matching excerpt.
+
+**Sample Request (cURL):**
+```bash
+curl.exe -X POST http://localhost:8080/api/contracts/1/ask \
+  -H "Content-Type: application/json" \
+  -d "{\"question\":\"What is the payment schedule?\"}"
+```
+
+**Successful Response (`200 OK`) — answer found:**
+```json
+{
+  "contractId": 1,
+  "question": "What is the payment schedule?",
+  "answer": "Payment shall be made within 30 days of receipt of the invoice.",
+  "found": true,
+  "sourceExcerpt": "Payment shall be made within 30 days of receipt of the invoice."
+}
+```
+
+**Successful Response (`200 OK`) — no relevant answer:**
+```json
+{
+  "contractId": 1,
+  "question": "What is the color of the astronaut spaceship?",
+  "answer": "I couldn't find a relevant answer in this contract.",
+  "found": false,
+  "sourceExcerpt": null
+}
+```
+
+**Error — no document text available (`400 Bad Request`):**
+```json
+{
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Contract #2 has no extracted document text available for Q&A.",
+  "path": "/api/contracts/2/ask",
+  "timestamp": "2026-10-12T15:00:00.000"
+}
+```
+
+**Error — contract not found (`404 Not Found`):**
+```json
+{
+  "status": 404,
+  "error": "Not Found",
+  "message": "Contract not found with id: 999",
+  "path": "/api/contracts/999/ask",
+  "timestamp": "2026-10-12T15:00:00.000"
+}
+```
+
+---
+
+### 8. Error Responses
+Standardized JSON error formatting without sensitive stack traces:
+
+- **Missing/Empty File (`400 Bad Request`):**
+```json
+{
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Uploaded file cannot be empty. Please select a valid contract document file to upload.",
+  "path": "/api/contracts",
+  "timestamp": "2026-10-12T14:20:00.000"
+}
+```
+
+- **Invalid Status Transition (`400 Bad Request`):**
+```json
+{
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Invalid status transition from DRAFT to APPROVED. Permitted next transitions: REVIEW",
+  "path": "/api/contracts/1/status",
+  "timestamp": "2026-10-12T14:20:00.000"
+}
+```
+
+- **No Document Attached (`404 Not Found`):**
+```json
+{
+  "status": 404,
+  "error": "Not Found",
+  "message": "No document file is attached to contract #1",
+  "path": "/api/contracts/1/document",
+  "timestamp": "2026-10-12T14:20:00.000"
+}
+```
+
+---
+
+## How to Run on Windows
+
+### Start Backend:
+```powershell
+cd "c:\Users\Aryan Sharma\Desktop\contract_vault\backend"
+.\mvnw.cmd spring-boot:run
+```
+*(Runs on `http://localhost:8080`)*
+
+### Start Frontend:
+```powershell
+cd "c:\Users\Aryan Sharma\Desktop\contract_vault\frontend"
+npm.cmd run dev
+```
+*(Runs on `http://localhost:5173`)*
+
+---
+
+## Testing
+
+### Run Backend Automated Tests:
+```powershell
+cd "c:\Users\Aryan Sharma\Desktop\contract_vault\backend"
+.\mvnw.cmd test
+```
+
+### Run Frontend Production Build:
+```powershell
+cd "c:\Users\Aryan Sharma\Desktop\contract_vault\frontend"
+npm.cmd run build
+```
+
