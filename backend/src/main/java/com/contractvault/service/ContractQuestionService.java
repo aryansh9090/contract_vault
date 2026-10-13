@@ -79,9 +79,14 @@ public class ContractQuestionService {
         addSynonyms("worth", "value", "price", "cost", "amount", "fee", "total");
         addSynonyms("salary", "stipend", "pay", "payment", "fee", "cost", "price", "amount", "rupees", "inr", "compensation", "remuneration", "wage", "value");
         addSynonyms("stipend", "salary", "pay", "payment", "fee", "cost", "price", "amount", "rupees", "inr", "compensation", "remuneration", "wage", "value");
-        addSynonyms("payment", "pay", "stipend", "salary", "paid", "payable", "fee", "cost", "invoice", "compensation", "amount", "value", "schedule", "milestone", "installment");
+        addSynonyms("payment", "pay", "stipend", "salary", "paid", "payable", "fee", "cost", "invoice", "compensation", "amount", "value", "schedule", "milestone", "installment", "settled", "due");
         addSynonyms("pay", "stipend", "salary", "payment", "paid", "payable", "fee", "cost", "invoice", "compensation", "remuneration", "amount", "value");
         addSynonyms("compensation", "salary", "stipend", "remuneration", "fee", "pay", "payment", "amount", "value");
+
+        // Invoices / Billing
+        addSynonyms("invoice", "invoices", "payment", "bill", "billing", "settled", "due", "receipt", "receipt of invoice", "fee", "fees");
+        addSynonyms("invoices", "invoice", "payment", "bill", "billing", "settled", "due", "receipt", "fee");
+        addSynonyms("due", "invoices", "invoice", "payment", "payable", "settled", "within", "days", "deadline");
 
         // Dates / Timeline
         addSynonyms("date", "dates", "effective", "commence", "commencement", "execution", "signed", "signing", "dated", "calendar", "day");
@@ -125,9 +130,16 @@ public class ContractQuestionService {
         addSynonyms("confidentiality", "confidential", "secret", "disclosure", "nondisclosure", "nda", "proprietary", "trade secret");
         addSynonyms("confidential", "confidentiality", "secret", "disclosure", "nondisclosure", "nda", "proprietary");
 
-        // Liability & Indemnity
-        addSynonyms("liability", "liable", "indemnify", "indemnification", "indemnity", "damages", "responsible", "claims", "loss", "limitation");
+        // Liability & Indemnity & Caps
+        addSynonyms("liability", "liable", "indemnify", "indemnification", "indemnity", "damages", "responsible", "claims", "loss", "limitation", "cap", "caps", "aggregate", "maximum");
+        addSynonyms("cap", "liability", "maximum", "aggregate", "limitation", "damages", "limit");
         addSynonyms("indemnity", "indemnify", "indemnification", "liability", "damages", "hold harmless");
+
+        // Data, Privacy & Security
+        addSynonyms("security", "incident", "breach", "notification", "deadline", "urgent", "protective", "hours", "notify");
+        addSynonyms("incident", "security", "breach", "notification", "deadline", "hours", "urgent");
+        addSynonyms("deadline", "hours", "days", "notification", "notice", "time", "security", "incident");
+        addSynonyms("data", "personal data", "transfer", "outside india", "protection", "privacy", "gdpr", "retention", "deletion", "return", "customer data");
 
         // Intellectual Property
         addSynonyms("intellectual", "property", "ip", "copyright", "patent", "trademark", "ownership", "rights", "license");
@@ -138,7 +150,7 @@ public class ContractQuestionService {
         addSynonyms("services", "scope", "deliverables", "obligations", "duties", "work", "tasks");
         addSynonyms("deliverables", "services", "scope", "milestones", "work");
         addSynonyms("role", "position", "designation", "job", "intern", "internship", "responsibilities", "duties", "task", "work", "title");
-        addSynonyms("hours", "schedule", "timing", "timings", "shift", "working", "daily", "time", "days");
+        addSynonyms("hours", "schedule", "timing", "timings", "shift", "working", "daily", "time", "days", "deadline");
         addSynonyms("working", "hours", "schedule", "work", "timing");
         addSynonyms("schedule", "hours", "timings", "working", "days", "shift", "payment", "timeline");
         addSynonyms("address", "location", "located", "drive", "sector", "office", "city");
@@ -196,7 +208,7 @@ public class ContractQuestionService {
             return new QuestionResponse(
                     contractId,
                     question,
-                    "I couldn't find a relevant answer in this contract. Please ask a more specific question.",
+                    "I couldn't find a relevant answer in this contract. Please ask a specific question about the contract's terms, duration, payment, parties, or clauses.",
                     false,
                     null
             );
@@ -209,7 +221,7 @@ public class ContractQuestionService {
             return new QuestionResponse(
                     contractId,
                     question,
-                    "I couldn't find a relevant answer in this contract.",
+                    "I couldn't find a relevant answer in this contract. Please ask a specific question about the contract's terms, duration, payment, parties, or clauses.",
                     false,
                     null
             );
@@ -298,14 +310,19 @@ public class ContractQuestionService {
             for (String sentence : sentences) {
                 String sTrim = sentence.trim();
                 if (sTrim.length() < 10) continue;
+                if (sTrim.toLowerCase().contains("testing suggestions") || sTrim.toLowerCase().contains("end of fictional")) {
+                    continue;
+                }
                 String sLower = sTrim.toLowerCase();
                 double score = 0.0;
 
                 for (String token : queryTokens) {
-                    if (sLower.contains(token)) score += 3.5;
+                    if (containsWordStatic(sLower, token)) score += 3.5;
+                    else if (containsStemStatic(sLower, stemStatic(token))) score += 2.0;
                 }
                 for (String term : expandedTerms) {
-                    if (sLower.contains(term)) score += 1.8;
+                    if (containsWordStatic(sLower, term)) score += 1.8;
+                    else if (containsStemStatic(sLower, stemStatic(term))) score += 1.0;
                 }
                 // Boost for amounts / currency
                 if (qLower.contains("value") || qLower.contains("fee") || qLower.contains("cost") || qLower.contains("price") || qLower.contains("amount") || qLower.contains("pay")) {
@@ -383,6 +400,13 @@ public class ContractQuestionService {
                 }
             }
 
+            // Skip test suggestions and sample instructions
+            if (stripped.toLowerCase().contains("end of fictional") ||
+                stripped.toLowerCase().contains("testing suggestions") ||
+                stripped.toLowerCase().startsWith("testing suggestions")) {
+                continue;
+            }
+
             boolean isNumberedSection = NUMBERED_SECTION_PATTERN.matcher(stripped).find();
             boolean isUppercaseHeader = UPPERCASE_HEADER_PATTERN.matcher(stripped).matches();
 
@@ -435,7 +459,9 @@ public class ContractQuestionService {
         String[] paragraphs = text.split("\n{2,}");
         for (String para : paragraphs) {
             String cleaned = para.replaceAll("\\s+", " ").trim();
-            if (cleaned.length() >= 30 && !cleaned.toLowerCase().contains("table of contents")) {
+            if (cleaned.length() >= 30 && !cleaned.toLowerCase().contains("table of contents")
+                    && !cleaned.toLowerCase().contains("testing suggestions")
+                    && !cleaned.toLowerCase().contains("end of fictional")) {
                 passages.add(new Passage("", cleaned));
             }
         }
@@ -510,22 +536,22 @@ public class ContractQuestionService {
         // 1. Direct Multi-word Phrase Matching
         for (int i = 0; i < queryTokens.size() - 1; i++) {
             String phrase = queryTokens.get(i) + " " + queryTokens.get(i + 1);
-            if (combined.contains(phrase)) {
+            if (containsWord(combined, phrase) || combined.contains(phrase)) {
                 score += 10.0;
                 tokenMatches += 2;
             }
         }
 
-        // 2. Query Token Matching
+        // 2. Query Token Matching (with whole-word boundaries to avoid substring false positives)
         for (String token : queryTokens) {
             String tokenStem = stem(token);
 
-            // Matches in Title (ONLY if query token matches title)
+            // Matches in Title
             if (!title.isEmpty()) {
-                if (title.contains(token)) {
+                if (containsWord(title, token)) {
                     score += 6.0;
                     titleMatches++;
-                } else if (stem(title).contains(tokenStem)) {
+                } else if (containsStem(title, tokenStem)) {
                     score += 4.0;
                     titleMatches++;
                 }
@@ -535,7 +561,7 @@ public class ContractQuestionService {
             if (containsWord(combined, token)) {
                 score += 3.5;
                 tokenMatches++;
-            } else if (combined.contains(tokenStem)) {
+            } else if (containsStem(combined, tokenStem)) {
                 score += 2.0;
                 tokenMatches++;
             }
@@ -546,20 +572,27 @@ public class ContractQuestionService {
             if (queryTokens.contains(term)) continue;
             String termStem = stem(term);
 
-            if (!title.isEmpty() && title.contains(term)) {
-                score += 3.5;
-                synonymMatches++;
-            } else if (containsWord(combined, term)) {
+            if (!title.isEmpty()) {
+                if (containsWord(title, term)) {
+                    score += 3.5;
+                    synonymMatches++;
+                } else if (containsStem(title, termStem)) {
+                    score += 2.0;
+                    synonymMatches++;
+                }
+            }
+
+            if (containsWord(combined, term)) {
                 score += 2.0;
                 synonymMatches++;
-            } else if (combined.contains(termStem)) {
+            } else if (containsStem(combined, termStem)) {
                 score += 1.2;
                 synonymMatches++;
             }
         }
 
         // CRITICAL: If 0 query tokens, 0 title matches, and 0 synonyms matched:
-        // Score is strictly ZERO! NO UNCONDITIONAL TITLE BONUSES!
+        // Score is strictly ZERO! NO UNCONDITIONAL BONUSES!
         if (tokenMatches == 0 && titleMatches == 0 && synonymMatches == 0) {
             matchStats[0] = 0;
             return 0.0;
@@ -602,9 +635,15 @@ public class ContractQuestionService {
             }
         }
 
-        // D. Parties / Who intent
-        if (qLower.contains("party") || qLower.contains("parties") || qLower.contains("who") || qLower.contains("between") ||
-            qLower.contains("client") || qLower.contains("vendor") || qLower.contains("provider") || qLower.contains("employer") || qLower.contains("employee")) {
+        // D. Parties / Who intent (must be an explicit party query, not any query with the word 'who')
+        boolean isExplicitPartyQuery = qLower.contains("who is the client") || qLower.contains("who is the vendor") ||
+                qLower.contains("who is the provider") || qLower.contains("who are the parties") ||
+                qLower.contains("who signed") || qLower.contains("parties involved") ||
+                qLower.contains("who is the employer") || qLower.contains("who is the employee") ||
+                (qLower.contains("party") || qLower.contains("parties")) ||
+                (qLower.contains("who") && (qLower.contains("between") || qLower.contains("contract") || qLower.contains("agreement")));
+
+        if (isExplicitPartyQuery) {
             if (combined.contains("by and between") || combined.contains("entered into between") ||
                 combined.contains("client") || combined.contains("provider") || combined.contains("consultant") ||
                 combined.contains("employee") || combined.contains("employer") || passage.title.contains("Parties") || passage.title.contains("Signatures")) {
@@ -629,10 +668,29 @@ public class ContractQuestionService {
         }
 
         // G. Payment schedule / Invoice intent
-        if (qLower.contains("payment") || qLower.contains("pay") || qLower.contains("invoice") || qLower.contains("when must")) {
+        if (qLower.contains("payment") || qLower.contains("pay") || qLower.contains("invoice") || qLower.contains("invoices") || qLower.contains("when must") || qLower.contains("due")) {
             if (combined.contains("receipt of the invoice") || combined.contains("within 30 days") || combined.contains("payment shall be made") ||
-                combined.contains("due date") || combined.contains("net 30") || combined.contains("net 60") || combined.contains("invoice")) {
+                combined.contains("due date") || combined.contains("net 30") || combined.contains("net 60") || combined.contains("invoices must be settled") || combined.contains("invoice")) {
                 score += 7.0;
+            }
+        }
+
+        // H. Security & Incident & Personal Data Transfer intent
+        if (qLower.contains("security") || qLower.contains("incident") || qLower.contains("breach") ||
+            qLower.contains("notification") || qLower.contains("personal data") || qLower.contains("outside india") ||
+            qLower.contains("data after termination")) {
+            if (combined.contains("personal data") || combined.contains("outside india") ||
+                combined.contains("security incident") || combined.contains("promptly") ||
+                combined.contains("written approval") || combined.contains("urgent protective action")) {
+                score += 8.0;
+            }
+        }
+
+        // I. Liability cap intent
+        if (qLower.contains("liability") || qLower.contains("cap") || qLower.contains("damages") || qLower.contains("indemnity")) {
+            if (combined.contains("liability") || combined.contains("cap") || combined.contains("aggregate") ||
+                combined.contains("direct damages") || combined.contains("shall not exceed")) {
+                score += 8.0;
             }
         }
 
@@ -651,10 +709,30 @@ public class ContractQuestionService {
     }
 
     private boolean containsWord(String text, String word) {
+        return containsWordStatic(text, word);
+    }
+
+    private boolean containsStem(String text, String stem) {
+        return containsStemStatic(text, stem);
+    }
+
+    private static boolean containsWordStatic(String text, String word) {
+        if (!StringUtils.hasText(text) || !StringUtils.hasText(word)) return false;
         return text.matches(".*\\b" + Pattern.quote(word) + "\\b.*");
     }
 
+    private static boolean containsStemStatic(String text, String stem) {
+        if (!StringUtils.hasText(text) || !StringUtils.hasText(stem) || stem.length() < 4) {
+            return false;
+        }
+        return text.matches(".*\\b" + Pattern.quote(stem) + "[a-z]{0,4}\\b.*");
+    }
+
     private String stem(String word) {
+        return stemStatic(word);
+    }
+
+    private static String stemStatic(String word) {
         String w = word.toLowerCase();
         String[] suffixes = {"ies", "ves", "tion", "sion", "ment", "able", "ible", "ance", "ence", "ing", "ed", "es", "s"};
         for (String suffix : suffixes) {

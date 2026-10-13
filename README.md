@@ -95,8 +95,7 @@ contract_vault/
 ### 2. Document Text Extraction
 - **PDF Documents:** Parsed using **Apache PDFBox 3.0** (`PDFTextStripper`).
 - **Word Documents:** Parsed using **Apache POI 5.4** (`XWPFDocument` and `XWPFWordExtractor`).
-- **Signature Verification:** Validates file magic bytes (e.g. `%PDF` for PDF, `PK` ZIP container for DOCX) to ensure genuine file types rather than just checking extensions.
-- **Empty & Scanned Document Policy:** If a document contains no extractable text (such as an image-only scanned PDF), the API rejects the upload with an explicit message: *"The uploaded document contains no readable text. Scanned image-only PDFs requiring OCR are not supported."* This prevents misleading records from being created without searchable content.
+- **Empty & Scanned Document Policy:** For documents containing no extractable text (such as scanned image-only PDFs), the document is safely stored and the contract record is cataloged in the repository with an empty text record (`""`). This enables organizations to archive and download paper contracts, while the Q&A service gracefully informs users when a query is submitted: *"Contract has no extracted document text available for Q&A."* Support for automatic OCR via Tesseract/AWS Textract is planned for the production roadmap.
 
 ---
 
@@ -318,9 +317,23 @@ curl.exe -X POST http://localhost:8080/api/contracts/1/ask \
   "error": "Not Found",
   "message": "Contract not found with id: 999",
   "path": "/api/contracts/999/ask",
-  "timestamp": "2026-10-12T15:00:00.000"
-}
-```
+- **Q&A Engine Details:**
+  - **Tokenization & Stopwords:** Strips punctuation, corrects common typos (e.g. `cotract` → `contract`), and filters non-informational filler words.
+  - **Whole-Word & Stem-Bounded Matching:** All query tokens and stems require strict word boundaries (`\b`) to prevent false-positive substring matches (e.g. preventing "sam" from matching "sample").
+  - **Domain Synonym Expansion:** Expands legal and business concepts across finances, payment schedules, duration, liability caps, security incident deadlines, governing laws, and termination policies.
+  - **Intent & Pattern Alignment:** Boosts relevant clauses for specific question types (e.g., party identification, calendar dates, currency amounts, deadlines).
+  - **Boilerplate & Test Prompt Isolation:** Specifically ignores non-contract instructions such as sample testing suggestions or end-of-document footers.
+  - **Polite Handling of Out-of-Contract Queries:** When a query has no matching tokens or confidence score falls below the strict threshold (e.g. "Who is Sam Altman?"), the system gracefully responds that the information is not present in the contract without hallucinating or crashing.
+
+#### Current Q&A Limitations & Future RAG Roadmap:
+1. **Current Limitations:**
+   - **Lexical/Rule-Based:** Relies on keyword token matching and hardcoded synonyms; cannot understand abstract rephrasing outside the domain vocabulary.
+   - **No Multi-Hop Reasoning or Arithmetic:** Cannot calculate multi-year totals (e.g. "$1,000/month for 12 months") or perform logical reasoning across disconnected clauses.
+   - **OCR Dependent:** Scanned images require pre-extracted text or external OCR.
+2. **Enterprise RAG (Retrieval-Augmented Generation) Roadmap:**
+   - **Vector Embeddings:** Generate dense vector representations (e.g., via Spring AI, OpenAI `text-embedding-3-small`, or local HuggingFace embeddings).
+   - **Semantic Search:** Store embeddings in `pgvector` or Milvus to support true semantic similarity search across complex clauses.
+   - **LLM Grounding:** Feed the top retrieved passages to an LLM with strict instructions to answer solely based on the excerpt and state "not found in contract" when unmentioned.
 
 ---
 

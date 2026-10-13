@@ -943,6 +943,26 @@ class ContractVaultApplicationTests {
         assertNotNull(partiesResp);
         assertTrue(partiesResp.isFound());
         assertTrue(partiesResp.getAnswer().contains("Alpha Solutions") || partiesResp.getAnswer().contains("Omega Cloud"));
+
+        // 6. Out-of-contract negative test: "who is sam altman?" must be politely rejected
+        com.contractvault.dto.QuestionResponse outOfContractResp = restClient.post()
+                .uri("/api/contracts/{id}/ask", id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("question", "who is sam altman?"))
+                .retrieve().body(com.contractvault.dto.QuestionResponse.class);
+        assertNotNull(outOfContractResp);
+        assertFalse(outOfContractResp.isFound());
+        assertTrue(outOfContractResp.getAnswer().contains("couldn't find a relevant answer"));
+
+        // 7. In-contract specific domain question: "when are invoices due?"
+        com.contractvault.dto.QuestionResponse invoiceResp = restClient.post()
+                .uri("/api/contracts/{id}/ask", id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("question", "when are invoices due?"))
+                .retrieve().body(com.contractvault.dto.QuestionResponse.class);
+        assertNotNull(invoiceResp);
+        assertTrue(invoiceResp.isFound());
+        assertTrue(invoiceResp.getAnswer().toLowerCase().contains("30 days"));
     }
 
     @Test
