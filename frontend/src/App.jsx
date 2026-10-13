@@ -17,12 +17,12 @@ const TRANSITION_LABEL = {
   'REVIEW_DRAFT':'Revert to Draft','APPROVED_REVIEW':'Return to Review',
 };
 const SUGGESTED = [
+  'What is the contract value / fee?',
   'What is the duration of this contract?',
   'When must payment be made?',
-  'What are the termination conditions?',
   'Who are the parties involved?',
+  'What are the termination conditions?',
   'What are the confidentiality obligations?',
-  'What is the liability clause?',
 ];
 
 function fmt(dt) {
@@ -158,11 +158,12 @@ export default function App() {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.message || 'Error getting answer');
+      const isFound = d.found !== undefined ? Boolean(d.found) : (d.answerFound !== undefined ? Boolean(d.answerFound) : false);
       setQaHistory(prev => [...prev, {
         role: 'assistant',
         text: d.answer,
         excerpt: d.sourceExcerpt,
-        found: d.answerFound,
+        found: isFound,
       }]);
     } catch (err) {
       setQaHistory(prev => [...prev, {

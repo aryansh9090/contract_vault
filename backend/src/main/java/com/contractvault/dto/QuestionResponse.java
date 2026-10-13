@@ -51,6 +51,14 @@ public class QuestionResponse {
         this.found = found;
     }
 
+    public boolean isAnswerFound() {
+        return found;
+    }
+
+    public void setAnswerFound(boolean answerFound) {
+        this.found = answerFound;
+    }
+
     public String getSourceExcerpt() {
         return sourceExcerpt;
     }

@@ -59,11 +59,18 @@ class ContractVaultApplicationTests {
             PDPage page = new PDPage();
             document.addPage(page);
             try (PDPageContentStream stream = new PDPageContentStream(document, page)) {
-                stream.beginText();
                 stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 12);
-                stream.newLineAtOffset(50, 700);
-                stream.showText(text);
-                stream.endText();
+                float y = 700;
+                for (String line : text.split("\r?\n")) {
+                    String trimmed = line.trim();
+                    if (!trimmed.isEmpty()) {
+                        stream.beginText();
+                        stream.newLineAtOffset(50, y);
+                        stream.showText(trimmed);
+                        stream.endText();
+                    }
+                    y -= 15;
+                }
             }
             document.save(baos);
             return baos.toByteArray();
@@ -851,6 +858,91 @@ class ContractVaultApplicationTests {
         assertNotNull(resp2);
         assertTrue(resp1.getAnswer().toLowerCase().contains("three years"));
         assertTrue(resp2.getAnswer().toLowerCase().contains("five years"));
+    }
+
+    @Test
+    void askQuestionHandlesComplexContractWithTableOfContentsAndTypos() throws Exception {
+        String complexDoc = "TABLE OF CONTENTS\n" +
+                "1. Definitions and Interpretation\n" +
+                "2. Term and Validity\n" +
+                "3. Fees and Payment\n" +
+                "4. Termination\n\n" +
+                "This Master Software Services Agreement is executed on October 15, 2026, by and between Alpha Solutions Ltd (\"Client\") and Omega Cloud Services Inc (\"Service Provider\").\n\n" +
+                "1. Definitions and Interpretation\n" +
+                "1.1 \"Agreement\" means this Master Software Services Agreement.\n" +
+                "1.2 \"Effective Date\" means October 15, 2026.\n\n" +
+                "2. Term and Validity\n" +
+                "This agreement shall remain effective for a duration of three years from the Effective Date.\n\n" +
+                "3. Fees and Payment\n" +
+                "The total contract value is $120,000 USD payable in monthly installments of $10,000.\n" +
+                "All invoices must be settled within 30 days of receipt.\n\n" +
+                "4. Termination\n" +
+                "Either party may terminate this agreement upon 30 days written notice to the other party.\n" +
+                "This agreement is governed by the laws of California.";
+
+        byte[] pdf = createSamplePdf(complexDoc);
+        ByteArrayResource res = new ByteArrayResource(pdf) {
+            @Override public String getFilename() { return "complex_test.pdf"; }
+        };
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("title", "Sample complex contract for testing");
+        body.add("file", res);
+        ContractResponse created = restClient.post().uri("/api/contracts").contentType(MediaType.MULTIPART_FORM_DATA).body(body).retrieve().body(ContractResponse.class);
+        assertNotNull(created);
+        Long id = created.getId();
+
+        // 1. "cotract value" with typo
+        com.contractvault.dto.QuestionResponse valRespTypo = restClient.post()
+                .uri("/api/contracts/{id}/ask", id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("question", "cotract value"))
+                .retrieve().body(com.contractvault.dto.QuestionResponse.class);
+        assertNotNull(valRespTypo);
+        assertTrue(valRespTypo.isFound());
+        assertTrue(valRespTypo.isAnswerFound());
+        assertTrue(valRespTypo.getAnswer().contains("120,000"));
+
+        // 2. "contract value" exact
+        com.contractvault.dto.QuestionResponse valResp = restClient.post()
+                .uri("/api/contracts/{id}/ask", id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("question", "contract value"))
+                .retrieve().body(com.contractvault.dto.QuestionResponse.class);
+        assertNotNull(valResp);
+        assertTrue(valResp.isFound());
+        assertTrue(valResp.getAnswer().contains("120,000"));
+
+        // 3. "date"
+        com.contractvault.dto.QuestionResponse dateResp = restClient.post()
+                .uri("/api/contracts/{id}/ask", id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("question", "date"))
+                .retrieve().body(com.contractvault.dto.QuestionResponse.class);
+        assertNotNull(dateResp);
+        assertTrue(dateResp.isFound());
+        assertTrue(dateResp.getAnswer().toLowerCase().contains("october 15, 2026"));
+
+        // 4. "helo" -> must NOT return "1. Definitions and Interpretation" or found=true
+        com.contractvault.dto.QuestionResponse heloResp = restClient.post()
+                .uri("/api/contracts/{id}/ask", id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("question", "helo"))
+                .retrieve().body(com.contractvault.dto.QuestionResponse.class);
+        assertNotNull(heloResp);
+        assertFalse(heloResp.isFound());
+        assertFalse(heloResp.isAnswerFound());
+        assertFalse(heloResp.getAnswer().equals("1. Definitions and Interpretation"));
+        assertTrue(heloResp.getAnswer().contains("couldn't find a relevant answer"));
+
+        // 5. "parties"
+        com.contractvault.dto.QuestionResponse partiesResp = restClient.post()
+                .uri("/api/contracts/{id}/ask", id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("question", "Who are the parties involved?"))
+                .retrieve().body(com.contractvault.dto.QuestionResponse.class);
+        assertNotNull(partiesResp);
+        assertTrue(partiesResp.isFound());
+        assertTrue(partiesResp.getAnswer().contains("Alpha Solutions") || partiesResp.getAnswer().contains("Omega Cloud"));
     }
 
     @Test
