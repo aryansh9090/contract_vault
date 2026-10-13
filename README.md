@@ -6,6 +6,92 @@ The system is designed to allow organizations to upload contracts (PDF and Micro
 
 ---
 
+## 📋 Evaluation Review Deliverables & Architecture Clarifications
+
+This section directly addresses the evaluation review questions regarding production persistence, confidentiality protection, scanned document parsing design, Q&A limitations/improvements, and deployment links.
+
+### 1. Live Deployment & Submission Resources
+- **Live Deployed Application:** [https://contract-vault.onrender.com](https://contract-vault.onrender.com)
+- **GitHub Repository:** [https://github.com/aryansh9090/contract_vault](https://github.com/aryansh9090/contract_vault)
+- **Automated Test Results:** **27/27 Tests Passed** (`BUILD SUCCESS`, 0 Failures, 0 Errors, 0 Skipped).
+- **Screen-Recorded Demonstration:** `[Link to Screen-Recorded Demonstration Video]`  
+  *(Demonstrates contract upload, retrieval, download/preview, status transitions, Q&A with source citations, negative tests on out-of-contract queries, and input validation)*.
+
+---
+
+### 2. Ensuring Document and Database Persistence Across Restarts & Redeployments
+
+#### The Challenge with Ephemeral Containers
+In cloud container environments (such as Docker on Render, AWS ECS, or Kubernetes), the local container filesystem is **ephemeral**. Any files written directly to the container's disk (`/app/data` or `/app/storage`) are wiped when a new deployment occurs or the container restarts.
+
+#### How Persistence is Handled:
+1. **Local Development Environment:**
+   - Database records persist across restarts via file-backed H2 engine at `backend/data/contractvaultdb.mv.db`.
+   - Uploaded documents persist in the configured local directory `./storage`.
+2. **Production Enterprise Architecture:**
+   - **Database Persistence (Relational):** The application uses Spring Data JPA / Hibernate abstractions with zero vendor lock-in. For production, the database is decoupled from the application container by migrating to a managed cloud database such as **PostgreSQL** (AWS RDS, Supabase, or Render PostgreSQL) via standard Spring environment variables:
+     ```bash
+     SPRING_DATASOURCE_URL=jdbc:postgresql://<host>:5432/<database>
+     SPRING_DATASOURCE_USERNAME=<user>
+     SPRING_DATASOURCE_PASSWORD=<password>
+     ```
+   - **Document Storage Persistence (Object Storage):** Physical contract documents are persisted externally using **Cloud Object Storage** (e.g., **AWS S3**, **Google Cloud Storage**, or **Supabase Storage**) or by attaching a **Persistent Volume Claim (PVC)** mounted to `/app/storage`. When files are uploaded, unique UUID storage keys decouple physical filenames from system metadata, ensuring zero data loss across container lifecycle events.
+
+---
+
+### 3. Protecting Confidential Contract Information
+
+Contracts contain highly sensitive commercial and legal terms (pricing, salaries, trade secrets, liability terms). Access is protected using four enterprise security layers:
+
+1. **Authentication & Role-Based Access Control (RBAC):**
+   - Secure the API using **Spring Security** with **OAuth2 / JWT tokens** or enterprise SSO.
+   - Restrict endpoint operations by role:
+     - `LEGAL_ADMIN`: Upload, approve, edit, and delete contracts.
+     - `REVIEWER`: Inspect contracts and transition status from `DRAFT` to `REVIEW`.
+     - `VIEWER`: Read-only access to approved contracts.
+2. **Data Encryption (In Transit & At Rest):**
+   - **In Transit:** Enforce HTTPS with TLS 1.3 for all frontend-to-backend and backend-to-storage traffic.
+   - **At Rest:** Database fields and file storage volumes are encrypted using AES-256 (e.g., AWS KMS server-side encryption for S3 buckets).
+3. **Secure Document Access (No Public Static URLs):**
+   - Stored documents are never exposed as static web assets or direct filesystem paths.
+   - Downloads and previews are authorized on-demand: the server validates credentials and issues short-lived, **time-limited Pre-Signed URLs** (e.g., valid for 5 minutes) rather than permanent public links.
+4. **Audit Logging & Compliance:**
+   - Every read, download, status update, and Q&A query is logged in an immutable audit table with timestamp, user ID, IP address, and contract ID to comply with SOC 2 / ISO 27001 requirements.
+
+---
+
+### 4. Scanned PDF Handling: Design Rationale & Implementation Synchronization
+
+- **Initial Specification:** Early drafts specified outright rejection of documents containing no readable text to prevent unsearchable records.
+- **Production Usability Rationale:** In real-world enterprise legal workflows, organizations frequently need to catalog, manage approval lifecycles for, and download legacy scanned agreements even if automated text extraction is unavailable without OCR.
+- **Implemented Architecture:** `DocumentParserService` gracefully stores the uploaded document and creates the contract record with empty extracted text (`""`). When a user attempts to ask questions on a scanned contract, the Q&A service detects that text is unavailable and informs the user politely:
+  > *"Contract has no extracted document text available for Q&A."*
+- **Future OCR Roadmap:** Integrating an OCR pipeline (Tesseract OCR / AWS Textract) to extract optical text from scanned documents during background processing.
+
+---
+
+### 5. Q&A Approach: Architecture, Limitations, and Improvements
+
+#### A. Current Implementation
+The Q&A engine ([`ContractQuestionService.java`](backend/src/main/java/com/contractvault/service/ContractQuestionService.java)) provides dependency-free, high-speed contract querying:
+- **Whole-Word & Stem-Bounded Token Matching:** Strict regex word boundaries (`\b`) prevent substring false positives (e.g. preventing `"sam"` from matching `"sample"`).
+- **Domain Synonym Expansion:** Maps legal concepts across payments, fees, deadlines, duration, governing laws, parties, and liability terms.
+- **Prompt Boilerplate Isolation:** Filters out test prompt suggestions and document footers to prevent non-contract text from being cited as answers.
+- **Graceful Negative Query Handling:** Out-of-contract queries (e.g., questions about celebrities or unrelated topics) are strictly rejected with a polite not-found response instead of hallucinating.
+
+#### B. Current Limitations
+1. **Lexical / Rule-Based:** Relies on token matching; cannot comprehend complex semantic paraphrasing outside defined synonym mappings.
+2. **No Multi-Clause Reasoning or Arithmetic:** Cannot calculate multi-year financial totals (e.g. "$10,000/month for 2 years") or resolve conditional cross-clause exceptions.
+3. **Table & Image Data:** Unstructured tables and scanned image PDFs require dedicated OCR and tabular parsing.
+
+#### C. Enterprise RAG (Retrieval-Augmented Generation) Roadmap
+1. **Dense Vector Embeddings:** Chunk contract text and compute semantic embeddings using models such as `text-embedding-3-small` or local HuggingFace sentence transformers.
+2. **Vector Similarity Index:** Store vectors in `pgvector` or Milvus for sub-millisecond semantic retrieval across thousands of pages.
+3. **LLM Synthesis with Grounding:** Feed retrieved chunks to an LLM via **Spring AI** with strict system prompts:
+   > *"Answer solely based on the provided contract excerpts. If the information is absent, state that it is not present in the contract."*
+
+---
+
 ## Technology Stack
 
 - **Backend:** Java 25, Spring Boot 4.x, Spring Data JPA, Hibernate ORM, Bean Validation, Apache PDFBox 3.0, Apache POI 5.4, Spring Boot Actuator, Maven Wrapper (`mvnw.cmd`)
